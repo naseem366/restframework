@@ -196,11 +196,6 @@ class delete_address(APIView):
 
 
 
-
-
-
-
-'''
 class SendEmailAPIView(APIView):
     code = CharField(allow_blank=True)
 
@@ -449,4 +444,241 @@ def check_blank_or_null(data):
 
 
 
-'''
+
+
+
+
+
+
+
+
+
+
+
+from rest_framework.generics import (
+    ListAPIView, RetrieveAPIView, UpdateAPIView, DestroyAPIView, CreateAPIView
+)
+from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.response import Response
+from django.contrib.auth import get_user_model
+from rest_framework.status import HTTP_200_OK, HTTP_400_BAD_REQUEST
+from rest_framework.views import APIView
+from .serializers import *
+import random
+from django.core.mail import send_mail
+from accounts.models import *
+
+User = get_user_model()
+from rest_framework_jwt.settings import api_settings
+
+jwt_payload_handler = api_settings.JWT_PAYLOAD_HANDLER
+jwt_encode_handler = api_settings.JWT_ENCODE_HANDLER
+
+from rest_framework_jwt.authentication import JSONWebTokenAuthentication
+
+
+class UserDetailsAPIView(RetrieveAPIView):
+    queryset = User.objects.all()
+    serializer_class = UserDetailSerializer
+    lookup_field = 'pk'
+
+
+class UserUpdateAPIView(UpdateAPIView):
+    queryset = User.objects.all()
+    serializer_class = UserDetailSerializer
+    lookup_field = 'pk'
+
+
+class UserDeleteAPIView(DestroyAPIView):
+    queryset = User.objects.all()
+    serializer_class = UserDetailSerializer
+    lookup_field = 'pk'
+
+
+class UserListAPIView(ListAPIView):
+    queryset = User.objects.all().order_by("id")
+    serializer_class = UserListSerializer
+
+
+class SendEmailAPIView(APIView):
+    otp_value = CharField(allow_blank=True)
+
+    def get_object(self):
+        return self.request.user
+
+    def post(self, request):
+        user = self.get_object()
+        serializer = SendEmailSerializer(data = request.data)
+
+        if serializer.is_valid():
+            email = serializer.data.get("email")
+            otp_value = serializer.data.get("otp_value")
+
+            send_mail(
+                'OTP Verification Code from zainul',
+                'your otp verification code is  ' + str(otp_value) + ', Now, go to Otp verification page',
+                't4snietzainul@gmail.com',
+                [email],
+                fail_silently=False,
+            )
+
+            return Response({
+                'message': 'Email Sent Successfully',
+                'user':serializer.data.get("user_id")
+            }, status=200)
+
+        error_keys = list(serializer.errors.keys())
+        if error_keys:
+            error_msg = serializer.errors[error_keys[0]]
+            return Response({'message': error_msg[0]}, status=400)
+        return Response(serializer.errors, status=400)
+
+
+class CheckOtpAPIView(ListAPIView):
+    otp_value = CharField(allow_blank=True)
+    user = CharField(allow_blank=True)
+
+    def get_object(self):
+        return self.request.user
+
+    def post(self, request):
+        userObj = self.get_object()
+        serializer = CheckOtpSerializer(data=request.data)
+
+        if serializer.is_valid():
+            return Response({
+                'message': 'Otp Verified Successfully',
+            }, status=200)
+
+        error_keys = list(serializer.errors.keys())
+        if error_keys:
+            error_msg = serializer.errors[error_keys[0]]
+            return Response({'message': error_msg[0]}, status=400)
+        return Response(serializer.errors, status=400)
+
+
+class ResetPasswordAPIView(APIView):
+    new_password = CharField(allow_blank=True)
+    conf_password = CharField(allow_blank=True)
+    user_id = CharField(allow_blank=True)
+
+    def get_object(self):
+        return self.request.user
+
+    def post(self, request, *args, **kwargs):
+        user = self.get_object()
+        serializer = ResetPasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            new_password = serializer.data.get("new_password")
+            user_id = serializer.data.get('user_id')
+
+            u = User.objects.get(id__exact=user_id)
+            u.set_password(new_password)
+            u.save()
+            return Response(
+                {
+                    'message': 'Your password changed successfully'
+                }, status=200)
+
+        error_keys = list(serializer.errors.keys())
+        if error_keys:
+            error_msg = serializer.errors[error_keys[0]]
+            return Response({'message': error_msg[0]}, status=400)
+        return Response(serializer.errors, status=400)
+
+
+class ChangePasswordAPIView(APIView):
+    permission_classes = (IsAuthenticated,)
+    authentication_classes = [JSONWebTokenAuthentication]
+
+    def get_object(self):
+        return self.request.user
+
+    def post(self, request, *args, **kwargs):
+        user = self.get_object()
+        serializer = ChangePasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            old_password = serializer.data.get("old_password")
+            new_password = serializer.data.get("new_password")
+            conf_password = serializer.data.get("confPassword")
+
+            if not user.check_password(old_password):
+                return Response({
+                    "message": "You entered wrong current password"},
+                    status=400)
+
+            user.set_password(new_password)
+            user.save()
+            return Response(
+                {
+                    'message': 'Your password changed successfully'
+                }, status=200)
+
+        error_keys = list(serializer.errors.keys())
+        if error_keys:
+            error_msg = serializer.errors[error_keys[0]]
+            return Response({'message': error_msg[0]}, status=400)
+        return Response(serializer.errors, status=400)
+
+
+class ProfileApiView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JSONWebTokenAuthentication]
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        data = UserDetailSerializer(user).data
+        return Response({
+            'response': data
+        }, 200)
+
+    def post(self, request, *args, **kwargs):
+        data = request.data
+        user = request.user
+        serializer = UpdateProfileSerializer(data=data, instance=user)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                'data':serializer.data,
+                'message': 'User details saved succesfully'
+            }, status=HTTP_200_OK)
+
+        error_keys = list(serializer.errors.keys())
+        if error_keys:
+            error_msg = serializer.errors[error_keys[0]]
+            return Response({'message': error_msg[0]}, status=400)
+        return Response(serializer.errors, status=400)
+
+
+class UserCreateAPIView(CreateAPIView):
+    serializer_class = UserCreateSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'data':serializer.data,'message':'registered successfully'},status=HTTP_200_OK)
+        error_keys = list(serializer.errors.keys())
+        if error_keys:
+            error_msg = serializer.errors[error_keys[0]]
+            return Response({'message': error_msg[0]}, status=400)
+        return Response(serializer.errors, status=400)
+
+
+class UserLoginAPIView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = UserLoginSerializer
+
+    def post(self, request, *args, **kwargs):
+        data = request.data
+        serializer = UserLoginSerializer(data=data)
+        if serializer.is_valid():
+            return Response({
+                'message': 'Login successfully',
+                'data': serializer.data
+            }, status=200)
+        error_keys = list(serializer.errors.keys())
+        if error_keys:
+            error_msg = serializer.errors[error_keys[0]]
+            return Response({'message': error_msg[0]}, status=400)
+        return Response(serializer.errors, status=400)
